@@ -91,7 +91,8 @@ pub fn stack_properties(all_properties: &[ValueProperties], dimensionality: Opti
         // this is a library-wide assumption - that datasets have more than zero rows
         is_not_empty: all_properties.iter().all(|prop| prop.is_not_empty),
         dimensionality,
-        group_id
+        group_id,
+        sample_proportion: all_properties.iter().flat_map(|prop| prop.sample_proportion.clone()).collect()
     }))
 }
 

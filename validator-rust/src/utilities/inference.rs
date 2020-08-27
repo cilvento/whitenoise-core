@@ -215,6 +215,9 @@ pub fn infer_nullity(value: &Value) -> Result<bool> {
 pub fn infer_c_stability(value: &Array) -> Result<Vec<Float>> {
     Ok((0..value.num_columns()?).map(|_| 1.).collect())
 }
+pub fn infer_sample_proportion(value: &Array) -> Result<Vec<Float>> {
+    Ok((0..value.num_columns()?).map(|_| 1.).collect())
+}
 
 pub fn infer_property(
     value: &Value, prior_property: Option<&ValueProperties>
@@ -248,7 +251,11 @@ pub fn infer_property(
                 dimensionality: Some(array.shape().len() as i64),
                 group_id: prior_prop_arr
                     .map(|v| v.group_id.clone())
-                    .unwrap_or_else(Vec::new)
+                    .unwrap_or_else(Vec::new),
+                sample_proportion: match prior_prop_arr {
+                    Some(p) => p.sample_proportion.clone(),
+                    None => infer_sample_proportion(&array)?
+                }
             }.into()
         },
         Value::Dataframe(dataframe) => match prior_property {
