@@ -1,0 +1,686 @@
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+%\usepackage[english]{babel}
+
+%\usepackage{natbib}
+%\addbibresource{main.bib}
+\usepackage[square,numbers]{natbib}
+\bibliographystyle{abbrvnat}
+
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\newcommand{\LineComment}[1]{\Statex \textit{#1}}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{amsfonts}
+\usepackage{hyperref}
+% \hypersetup{\bibliography{biblio}
+%     colorlinks=true,
+%     linkcolor=blue,
+%     filecolor=magenta,      
+%     urlcolor=cyan,
+% }
+\usepackage{xcolor}
+\usepackage{appendix}
+\usepackage{graphicx}
+\usepackage{bbm}
+\usepackage{url}
+\usepackage{subfiles}
+\usepackage{enumerate}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+%\usepackage{subcaption}
+\usepackage[margin=.85in]{geometry}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{corollary}{Corollary}[theorem]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\newtheorem{conjecture}[theorem]{Conjecture}
+\newtheorem{assumption}[theorem]{Assumption}
+\newtheorem{remark}[theorem]{Remark}
+\newtheorem{mech}{Mechanism}
+\newtheorem{attack}{Attack}
+\newcommand{\todo}[1]{{\color{red} #1}}
+\newcommand{\M}{\mathcal{M}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\mt}{\mathtt}
+\newcommand{\github}{\href{https://github.com/cilvento/b2_exponential_mechanism}{github repository}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+%%%%%%%%%% Type commands %%%%%%%%%
+\newcommand{\unsigned}[1]{{\tt u#1}}
+\newcommand{\signed}[1]{{\tt i#1}}
+\newcommand{\Float}{{\tt Float}}
+
+
+\usepackage{listings, listings-rust}
+\usepackage{xcolor}
+
+\definecolor{codegreen}{rgb}{0.0,0.5,0.0}
+\definecolor{codegray}{rgb}{0.3,0.3,0.3}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.99,0.99,0.99}
+ 
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{blue},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+\newcommand{\aside}[1]{{\color{teal} \textbf{Aside:} #1}} 
+\newcommand{\temp}[1]{{\color{purple} \textbf{Template:} #1}} 
+\lstset{style=mystyle}
+
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{4}
+
+
+\title{Pseudocode and Proofs: Exponential Mechanism with Base-2 Differential Privacy}
+\author{Christina Ilvento}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Overview}
+This document describes the proofs for the exact implementation of the exponential mechanism. An exact implementation of the exponential mechanism has significant benefits from the perspective of reducing floating-point vulnerabilities. The exact implementation is based on base-2 differential privacy (see Section \ref{section:preliminaries})
+
+There are four main pieces of the implementation:
+\begin{enumerate}
+    \item Normalized sampling without division
+    \item Base-2 privacy parameters 
+    \item Exact arithmetic helper methods and monitoring
+    \item Mechanism logic
+\end{enumerate}
+
+\subsection{Review History}
+Reviewer: Salil Vadhan, in progress (8/31/2020)
+
+\subsection{Additional documentation.}
+\paragraph{Full paper.} The full paper describing this project can be found at \href{https://arxiv.org/abs/1912.04222}{https://arxiv.org/abs/1912.04222}. This paper has been peer reviewed. \aside{Will add a link to peer reviewed version when available.}
+
+\paragraph{github.} A version of this code is available on github: \href{https://github.com/cilvento/b2dp}{https://github.com/cilvento/b2dp}. There may be minor differences in the public github version (vs the pull request), as the public github version includes development for additional projects. 
+
+\subsection{General Notes and Caveats}
+\paragraph{Types.} In general, we will refer to Rust types, including the types provided by the {\tt Rug} crate e.g. \unsigned{32}, {\tt Float}.
+
+\paragraph{Differences from published versions.} The pseudocode and proofs presented in this document are not intended to be identical to the published versions. We present pseudocode in a form that more closely matches the code to make verification easier.
+
+\paragraph{[CRITICAL] Randomness Source.} As always, the source of randomness used is critical to any guarantee of privacy. We provide a wrapper for OpenSSL generated randomness for convenience, but it is the caller's responsibility to ensure that the rng they provide is sufficiently secure. 
+
+\paragraph{[CRITICAL] Dependencies.} The {\tt Rug} and {\tt gmp-mpfr-sys} crates are assumed to work as described. If there are errors in these crates, the guarantees of this code may be broken. In particular, if the arithmetic error flags are set improperly, there would be serious failures. A canary test exists for this functionality, but updates to dependencies should be checked carefully. (See Section \ref{section:misc}.)
+
+\paragraph{Thread safety/concurrency.} This code has not been tested specifically for thread safety or concurrency issues.
+
+\section{Preliminaries}\label{section:preliminaries}
+For reference, we include the specification of  base-2 differential privacy as well as the desired output distribution of the base-2 exponential mechanism.
+
+\begin{definition}[$|_2$ Differential Privacy]\label{def:b2DP}
+A randomized mechanism $\M$ is $\eta|_2-$differentially private if for all adjacent databases $d\sim d'$,
+\[\Pr[\M(d) \in C] \leq 2^{\eta} \Pr[\M(d') \in C]\]
+where probability is taken over the randomness of $\M$.
+\end{definition}
+
+\noindent A very simple change of base proves the relationship between base-2 and base-$e$.
+\begin{lemma}\label{lemma:DPtob2DP}
+Any mechanism which is $\eta|_2$-differentially private is $\ln(2)\eta-$differentially private. 
+\end{lemma}
+\begin{proof}
+$\Pr[\M(d) \in C] \leq 2^{\eta} \Pr[\M(d') \in C]$;
+$2^\eta = e^{\ln(2)\eta}$, thus
+$\Pr[\M(d) \in C] \leq e^{\ln(2)\eta} \Pr[\M(d') \in C]$.
+\end{proof}
+\noindent We can also re-state the exponential mechanism in base-2.
+\begin{mech}[$|_2$ Exponential Mechanism] 
+Given a privacy parameter $\eta$, an outcome set $O$ and a utility function $u: D \times O \rightarrow \mathbb{R}$ which maps (database, outcome) pairs to a real-valued utility, the $|_2$ exponential mechanism samples a single element from $O$ based on the probability distribution
+\begin{equation} p(o) := \frac{2^{-\eta u(d, o)}}{\sum_{o \in O} 2^{-\eta u(d,o)}} \label{eq:b2dist}
+\end{equation}
+If $\Delta u \leq \alpha$, then the base-2 exponential mechanism is $2\alpha\eta|_2$-DP.  
+\end{mech}
+
+\paragraph{Note:} we explicitly leave the sensitivity of the utility function ($\alpha$) out of the distribution specification, as the implementation assumes that either $\eta$ has been scaled to the appropriate sensitivity or the sensitivity is $1$. 
+
+%\clearpage
+\section{\texttt{exponential\_mechanism}}
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l p{3.25cm}|l p{9cm}|} \hline
+          & & Type & Description  \\\hline 
+          $\eta$ & {\tt eta} & {\tt Eta} & Privacy parameter of the form $z\log_2(x/2^y)$ for \unsigned{32} $x,y,z$. \\ \hline 
+         $optimize$ & {\tt arithmetic\_config .optimize} & {\tt bool} & Whether to optimize sampling. \\ \hline 
+         $optimize$ & {\tt arithmetic\_config .optimize} & {\tt bool} & Whether to optimize sampling. \\ \hline 
+        % $p$ & {\tt arithmetic\_config .precision} & \unsigned{32} & Precision. Recall that {\tt arithmetic\_config .get\_float} and {\tt .get\_rand\_float} return \Float~with precision {\tt arithmetic\_config.precision}. \\ \hline 
+        $o_{max}$ & {\tt max\_outcomes} & \unsigned{32} & Maximum size of outcome space for exponential mechanism. \\ \hline 
+         $u_{min}$ & {\tt utility\_min} & \signed{64} & Minimum utility (maximum magnitude weight) value. \\ \hline 
+         $u_{max}$ & {\tt utility\_max} & \signed{64} & Maximum utility (minimum magnitude weight) value. \\ \hline
+        $O$ & {\tt outcomes} & {\tt Vec<T>} & Vector of (generic type) outcomes. \\ \hline 
+        $U$ & {\tt utilities} & {\tt Vec<f64>} & The utilities for each outcome. \\ \hline 
+        $W$ & {\tt weights} & {\tt Vec<Float>} & The weight for each utility. \\ \hline 
+        % $total\_weight$ & {\tt total\_weight} & \Float & The sum of the {\tt weights} vector. \\ \hline 
+        $k$ & {\tt arithmetic\_config .retry\_min} & \unsigned{32} & Minimum number of retries.\\ \hline
+    \end{tabular}
+    \caption{Variables and Types for Exponential Mechanism}
+    \label{tab:expmech}
+\end{table}
+\subsection{Functionality Claims and Proofs}
+
+We state the following proposition to formally characterize the behavior of Algorithm \ref{alg:b2exp}:
+
+\begin{theorem}\label{thm:exp}
+Given parameters $u_{min}$ (\signed{64}), $u_{max}$ (\signed{64}), $o_{max}$ (\unsigned{32}), $\eta$ ({\tt Eta(x,y,z)} for \unsigned{32} {\tt x,y,z}), outcome set $O$ (generic type {\tt T}), and retry parameter $k$ (\unsigned{32}) and utility function $u$ ({\tt Fn(\&T)->f64}) determined independently of the database such that $\Delta u \leq 1$,\footnote{The choice of the function $u$ must be independent of the database, but the utilities may depend on the database.} Algorithm \ref{alg:b2exp}
+either 
+\begin{itemize}
+    \item[(1)] outputs an element from $O$ sampled according to the probability of the Base-2 Exponential Mechanism (Mechanism \ref{alg:b2exp}, Equation \ref{eq:b2dist}) on the utility function $\mathsf{clamp}(u,$ $u_{min},u_{max})$ where  $$\mathsf{clamp}(u,A,B)(x,o):=  \min(\max(A,u(x,o)), B)$$ or 
+    \item[(2)] outputs an error if the precision is insufficient or inexact arithmetic occurs. 
+\end{itemize}
+
+\end{theorem}
+
+
+\begin{proposition} [informal]
+Furthermore, except with probability $2^{-k}$, the mechanism described in Algorithm \ref{alg:b2exp} does not provide a useful timing (due to logic) or randomness side channel if precision is sufficient and no inexact arithmetic occurs. Timing information due to differences in floating point operation time may still be observable.
+\end{proposition}
+
+We omit the proof of the proposition, and refer the user to the timing channel discussion in Section \ref{section:normalizedsample}. This mechanism \textit{should be considered vulnerable to timing channels based on floating point operation times}, but timing channels due to sampling logic are largely mitigated by appropriate choice of the {\tt retry\_min} $(k)$ parameter. There are no documented timing channels related to precision determination.
+
+\paragraph{Proof of Theorem \ref{thm:exp}.}
+\begin{proof}
+The proof of the theorem follows from the correctness of each of the components of the mechanism.
+\begin{enumerate}
+    \item The mechanism first checks that the parameters are valid and determines the minimum working precision. The correctness of the precision follows from Theorem \ref{thm:sufficientprecision}.
+    \item It then computes the utilities of each element of the outcome space, and applies randomized rounding. The privacy of randomized rounding in the exponential mechanism follows from Lemma \ref{lemma:randomizedrounding}. 
+    \item Before computing the exponentiation base, $2^{-\eta}$, the mechanism begins monitoring inexact arithmetic. 
+    \item The weight of each element in the outcome space $2^{-\eta U[i]}$ is then computed. If no inexact arithmetic is detected, then each weight has been computed exactly.
+    \item An index is then sampled via $\textsc{NormalizedSample}$, which either returns an error or samples correctly from the desired distribution as shown in Theorem \ref{thm:normalizedsample}.
+    \item Finally, the mechanism either returns the outcome sampled, or an error if inexact arithmetic was performed.
+\end{enumerate}
+\end{proof}
+
+\paragraph{Notes}
+\begin{itemize}
+    \item Utility function. The utility function is specified as a function pointer that is assumed to have access to the underlying database. This prevents us from having any built-in assumptions about the form of the database or communication protocols, and instead allows utility function have significant flexibility. In general, it makes sense to construct utility functions from operations over the data set with well understood sensitivity, and common utility functions could also be provided. The utility function is assumed to be chosen independently from the database.
+    \item \textbf{No verification of sensitivity of the utility function is provided by the mechanism.}
+    \item The {\tt ExponentialOptions} struct is a caller facing struct that includes mechanism options like whether or not to optimize. For completeness we include the struct definition below.
+    \item The {\tt ExponentialConfig} struct is an internal struct that takes care of validating the important parameters, and constructing the appropriate {\tt ArithmeticConfig}. Also provides a wrapper around the {\tt get\_base} function provided by the privacy parameter {\tt Eta} using the precision determined for the mechanism. 
+    \item The type of the outcome space {\tt O} is generic to allow flexibility in the choice of outcome space.
+\end{itemize}
+
+\subsection{Pseudocode}
+As the mechanism utilizes many helper structs and methods to ensure that parameters are properly specified, we give additional comments in the pseudocode to help match to the code. 
+
+\begin{algorithm}[H]
+  \caption{Base-2 exponential mechanism}
+  \label{alg:b2exp}
+\begin{algorithmic}[1]
+  \LineComment{\textbf{Inputs}: data independent parameters $u_{min}$ (\signed{64}), $u_{max}$ (\signed{64}), $\eta(x,y,z)$ ({\tt Eta \{x,y,z\}} for \unsigned{32} {\tt x, y, z}), $o_{max}$ (\unsigned{32}), $O$ the set of outcomes, $k$ (\unsigned{32}) a timing channel mitigation parameter, optimize a boolean indicating whether to use optimized sampling, empirical a boolean indicating whether to use empirically determined minimum precision, and utility function $u$ ({\tt Fn(\&T)->f64}).} 
+  \LineComment{\textbf{Outputs}: $o \in O$ sampled according to the probability distribution of the base-2 exponential mechanism or an error.}
+    \Procedure{B2ExponentialMechanism}{$u_{min}$ (\signed{64}), $u_{max}$ (\signed{64}), $o_{max}$ (\unsigned{32}), $\eta(x,y,z)$ ({\tt Eta}), $O$ (generic {\tt T}), $k$ (\unsigned{32}), optimize ({\tt bool}), empirical ({\tt bool}), $u$({\tt Fn(\&T)->f64})}
+    \State Check that $\eta(x,y,z)$ is a valid parameter choice \Comment{{\tt eta.check()?;}}
+    \State Confirm that $u_{min}<u_{max}$, $o_{max}>0$. \Comment{{\tt exponential\_config} construction confirms these parameters are valid.}
+    \If{empirical $=$ false} \Comment{Use analytical minimum precision, Lemma \ref{lemma:minprec}.}
+    \State $p \leftarrow (\max(1,|u_{min}|)  + \max(1,|u_{max}|))z(y + b_x) + o_{max}$
+    \Else{}
+    \State $p \leftarrow \textsc{GetEmpiricalPrecision}(u_{min}, u_{max}, o_{max}, \eta)$ \Comment{Compute the empirical precision via Algorithm \ref{alg:precision}, Lemma \ref{lemma:minexpprec}}
+    \EndIf
+    \State Initialize an empty utility list $U$
+    \For{$i \in \{0,1,\ldots, |O|-1\}$} \Comment{Rust Lines 200-214}
+    \State $o \leftarrow O[i]$
+    \State Append $\mathsf{clamp}(\textsc{RandomizedRound}(u(o)),u_{min},u_{max})$ to $U$ \Comment{See Lemma \ref{lemma:randomizedrounding} for randomized rounding and Proposition \ref{prop:clamp} for clamping.}
+    \EndFor
+    \State Begin monitoring inexact arithmetic \Comment{Rust Line 217}
+    \State $b \leftarrow 2^{-\eta}$ \Comment{{\tt exponential\_config.get\_base();} may return an error if insufficient precision.}
+    \State Initialize an empty weight list $W$
+    \For{$i \in \{0,1,\ldots, |O|-1\}$} \Comment{Zero-indexing to match code.}
+        \State $w_i \leftarrow b^{U[i]}$
+        \State Append $w_i$ to $W$
+    \EndFor
+    \State $i^* \leftarrow \textsc{NormalizedSample}(W,p,k)$ \Comment{Rust Line 230}
+    \If{inexact arithmetic or $i^{*}$ is error} \Comment{{\tt exit\_exact\_scope()} Rust Line 237}
+        \State \textbf{return} error \Comment{All {\tt ?} Rust lines may return error.}
+    \EndIf
+    \State $o^* \leftarrow O[i^*]$ \Comment{Rust Line 234}
+    \State \textbf{return} $o^*$
+    \EndProcedure
+    \LineComment{Randomized rounding, see Section \ref{section:randomizedround}.}
+    \Function{RandomizedRound}{$x$ ({\tt f64})}
+    \State \textbf{return} $  \begin{cases}
+\lfloor{x} \rfloor \text{ with probability } |x-\lceil{x} \rceil|\\
+\lceil{x} \rceil \text{ with probability } |x-\lfloor{ x} \rfloor|\\
+\end{cases} $
+    \EndFunction
+  \end{algorithmic}
+\end{algorithm}
+
+
+
+
+\subsubsection{Rust Code}
+ \paragraph{Main mechanism}
+\lstinputlisting[firstline=123,lastline=243,firstnumber=123,language=rust]{code/exponential.rs}
+
+\paragraph{{\tt ExponentialOptions}}\phantom{   }
+
+\lstinputlisting[firstline=9,lastline=43,firstnumber=9,language=rust]{code/exponential.rs}
+
+\paragraph{{\tt ExponentialConfig}}
+\phantom{   }
+
+\lstinputlisting[firstline=46,lastline=119,firstnumber=46,language=rust]{code/exponential.rs}
+%\clearpage
+
+\section{\texttt{normalized\_sample}}\label{section:normalizedsample}
+
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l p{3.25cm}|l p{9cm}|} \hline
+          & & Type & Description  \\\hline 
+          $\eta$ & {\tt eta} & {\tt Eta} & Privacy parameter of the form $z\log_2(x/2^y)$ for \unsigned{32} $x,y,z$. \\ \hline 
+        $p$ & {\tt arithmetic\_config .precision} & \unsigned{32} & Precision. Recall that {\tt arithmetic\_config .get\_float} and {\tt .get\_rand\_float} return \Float~with precision {\tt arithmetic\_config.precision}. \\ \hline 
+         $weights$ & {\tt weights} & {\tt Vec<Float>} & The vector of weights for sampling. \\ \hline 
+        $total\_weight$ & {\tt total\_weight} & \Float & The sum of the {\tt weights} vector. \\ \hline 
+         $retry\_min$ & {\tt arithmetic\_config .retry\_min} & \unsigned{32} & Minimum number of retries.\\ \hline
+        $optimize$ & {\tt } & {\tt bool} & Whether to optimize sampling. \\ \hline
+        $t$ & {\tt t} & {\tt Float} & Intermediate value \\ \hline
+        $s$ & {\tt s} & {\tt Float} & Intermediate value (a random Float in $[0,2^k)$ where $2^k \geq total\_weight$) \\ \hline
+        $cweight$ & {\tt cumulative\_weight} & {\tt Float} & Intermediate value (running cumulative weight) \\ \hline
+        $index$ & {\tt index} & {\tt Option<usize>} & Intermediate value (the index to return) \\ \hline
+    \end{tabular}
+    \caption{Variables and Types for Normalized Sampling}
+    \label{tab:normsamp}
+\end{table}
+\subsection{Functionality Claims and Proofs}
+
+Normalized sample takes in a set of weights, and samples an index based on the normalized weights.
+
+There are two types of properties we care about: correctness of sampling (the main theorem) and timing channel properties (omitted, please see full paper).
+
+\begin{theorem}\label{thm:normalizedsample}
+\textsc{NormalizedSample} given a set of weights ({\tt Vec<Float>}) and a precision $p$ (\unsigned{32}) returns an index ({\tt usize}) (within the bounds of the weights list) according to $Pr(i) := \frac{weights[i]}{\sum weights}$, or returns an error if precision is insufficient to do so. That is $\forall i \in [|weights|]$, $\Pr[$return value $=i \mid $ return value is not an error$] = \frac{weights[i]}{\sum weights}$.
+\end{theorem}
+\begin{proof}
+The proof consists of three parts: first, correctness of the distribution assuming sufficient precision; second, sufficiency of precision; and %bounding the number of random bits required; 
+third, identification of error conditions.
+
+\textit{Correctness.} Notice that (assuming infinite precision) this procedure amounts to partitioning the range $[0,total\_weight)$, between the elements of $weights$ according to their weight, i.e., element $i$ is assigned range $[weights[i-1],weights[i])$, sampling a value $s$ in $[0,total\_weight)$ and choosing an element in $weights$ based on which partition $s$ lands in. 
+To see the correctness of the sampling procedure, observe that in each iteration of the  \textbf{while} loop (Algorithm \ref{alg:normalized_sample} Line \ref{line:ns_while}), a value is sampled in the range $[0,2^{k})$, where $k=\argmin_{k \in \mathbb{N}}\{2^k \geq total\_weight\}$, and either discarded if $s\geq total\_weight$ or kept. The values that are kept are therefore sampled uniformly in $[0,total\_weight)$. Thus,
+the probability that any given element is sampled is equivalent to the probability that a random value $s \in [0,total\_weight)$ falls into its assigned range of $[0,total\_weight)$, thus, each index is sampled with probability $\frac{weights[i]}{total\_weight}$, which is equivalent to the exponential mechanism. 
+
+% \textit{Sufficient precision.} Notice that $p$ bits %including $g$ leading zeros 
+% are sufficient to express any $c_i$ for $i \in [|W|]$. Imagine that an oracle agrees to read out a random value in $[0,t]$ with infinite bits of precision. After hearing $p$ bits, we have sufficient information to choose a single value in $W$, and hearing any more bits cannot change our choice. Thus, $p$ bits of precision are sufficient to simulate the infinite precision procedure.
+
+% \textit{Randomness required.} Notice that each iteration of the \textbf{while} loop at Line 23 requires $p$ random bits. 
+% Thus it suffices to show that the loop only resets (i.e., the $s$ is rejected) a constant number of times with high probability. %repeating Step 1 a constant number of times results in a sample $s \leq t$.
+% Notice that $s$ can only be greater than or equal to $t$ if the first random value selected is $1$, as $t$ requires at least $g$ bits to write. 
+% %Notice that the sample $s$ has the same number of bits as is required to express $t$, that is, the highest order bit sampled for $s$ is the highest order bit set to 1 in $t$. 
+% %Thus, the only way for $s$ to exceed $t$ is for $s$ to have a $1$ sampled as its first bit.
+% \footnote{Strictly speaking, $s$ will also need at least one additional lower bit to be $1$, but we give the simpler version as it's sufficient for our purposes.} The probability that $k$ samples all have $1$ as their first bit is $2^{-k}$. Thus, with probability at least $1-2^{-k}$, $k$ iterations will result in a successful sample. 
+
+
+\textit{Sufficient precision.} 
+Let $c_i$ denote the value of $cweight$ for the $i^{th}$ iteration of the loop in line \ref{line:ns_forloop}.
+Notice that $p$ bits %including $g$ leading zeros 
+are sufficient to express any $c_i$ for $i \in 0,\ldots, |weights|-1$. Imagine that an oracle agrees to read out a random value in $[0,total\_weight)$ with infinite bits of precision. After hearing $p$ bits, we have sufficient information to choose a single value in $weights$, and hearing any more bits cannot change our choice. The sampling procedure for $s$ in line \ref{line:ns_sample} is %The sum in Line \ref{line:sum} is 
+equivalent to taking the first $p$ bits from the oracle. % and writing them as a value in $[0,1)$ and then scaling by $2^k$. 
+This follows from observing that at most one element can ``claim'' any range $[a2^{-p},(a+1)2^{-p})$ as all  combinations of $weights$ can be expressed in $p$ bits of precision. %in $\textsc{GetRandomValue}$ %Lines 13-15 
+%uses $p$ random bits. 
+Thus, $p$ bits of precision are sufficient to simulate the infinite precision procedure.
+
+\textit{Error conditions.}
+%Suppose again that the procedure has access to infinite bits of randomness.  (i.e., that the procedure can continue by sampling additional randomness if $j<0$ in Line 17). In this case, the procedure correctly samples from the distribution. 
+Suppose that sufficient precision is not available, i.e., $p$ is not sufficient to express all of the cumulative weights. There are two possible cases, either (1) the value sampled covered a region containing $[s, s + 2^{k-p})$, and hearing any more bits of $s^*$ wouldn't change the outcome or (2) an error is returned. Thus, either the sample is the sample that would have been drawn given infinite precision, or an error is returned. 
+\end{proof}
+\paragraph{Notes:}
+\begin{itemize}
+    \item We disallow weights of zero to prevent ambiguity. If there is one zero weight and many positive weights, this might be interpreted as the zero-weight element having probability zero of being sampled. However, if all weights are zero, should an element be returned at random (as all weights are equal?) or should we return an error. To simplify the interface, we require positive weights. 
+    \item We take $|weights|$ to be the number of elements in the vector $weights$. \aside{I'm happy to adopt a different convention here, we could use $weights.length()$.}
+    \item The precision used in the code comes from the {\tt ArithmeticConfig}. All methods for changing the precision in the {\tt ArithmeticConfig} ensure that the precision is within the allowed range on the system the code is operating on (i.e., that it's a positive integer smaller than the maximum precision). (See Section \ref{section:arithmeticconfig}.)
+    \item The value of $s$ sampled in Line \ref{line:sample_s} is implemented via the $\mt{get\_rand\_float}$ function from the Arithmetic Config, which produces a Float of the precision specified in the config in the range $[0,1)$ with each bit drawn uniformly at random. 
+    \item Timing channels are somewhat mitigated by increasing the minimum number of loop retries, but this does not address timing channels due to differences in floating point operations. Users should not consider this code to be entirely timing channel safe, but they may increase the {\tt retry\_min} parameter to reduce the likelihood of an adversary observing useful timing information.
+    \item Inexact arithmetic versus insufficient precision. As written, it should not be possible for calls to {\tt normalized\_sample} to result in an insufficient precision error unless the working precision of the {\tt ArithmeticConfig} changes at run-time. In general, using insufficient precision for this method will result in an inexact arithmetic error instead (as constructing a {\tt Float} which results in truncation counts as ``inexact arithmetic''). Please see {\tt test\_insufficient\_sampling\_precision()} for example error conditions.
+\end{itemize}
+
+
+\subsection{Pseudocode}
+Pseudocode for the method is included in Algorithm \ref{alg:normalized_sample} below. 
+
+\begin{algorithm}[H]
+  \caption{Normalized Sample}
+  \label{alg:normalized_sample}
+\begin{algorithmic}[1]
+  \LineComment{\textbf{Inputs}: An array of positive $weights$ ({\tt Vec<Float>}), a precision $p$ (\unsigned{32}) which is a positive integer value less than the maximum system precision, a source of randomness $rng$, a boolean $optimization$ parameter, and a minimum number of retries $retry\_min$ (\unsigned{32}).} 
+  \LineComment{\textbf{Outputs}: An index sampled according to the normalized weights, i.e., $\Pr[$output $i] := \frac{weights[i]}{\sum weights}$.}
+    \Procedure{normalized\_sample}{$weights$, $p$, $rng$, $optimize$, $retry\_min$}
+    \State $total\_weight \leftarrow \sum_{i \in [|weights|]}weights[i]$ \Comment{Total weight}
+    \If{$total\_weight = 0$} 
+        \State \textbf{return} Error
+    \EndIf
+    \For{$w \in weights$}
+        \If{$w = 0$}
+            \State $zweight \leftarrow 1$ \Comment{Error if there is a zero weight.}
+            \If{$optimize = 1$}
+                \State \textbf{return} Error
+            \EndIf
+        \EndIf
+    \EndFor
+    \If{$zweight = 1$} \Comment{Return after full loop to prevent timing channel.}
+        \State \textbf{return} Error
+    \EndIf
+    \State $retries \leftarrow 0$
+    \State $k \leftarrow \textsc{get\_power\_bound}(total\_weight)$ \Comment{$\argmin_{k \in \mathbb{N}} \{2^k \geq total\_weight\}$}
+    \State $t \leftarrow total\_weight + 1$ 
+    \While{$ t \geq total\_weight$ or $retries < \texttt{retry\_min}$} \label{line:ns_while} \Comment{Rust lines 145-156.}
+    \State $s \sim \mathbf{Unif}([0,2^{p}))*2^{-p}$ \label{line:sample_s} \Comment{$s$ is a uniformly random $p$ bit value between $[0,1)$, see {\tt ArithmeticConfig::get\_rand\_float()}.}\label{line:ns_sample}
+    \State $s \leftarrow s * 2^k$ \Comment{$s$ is scaled to between $[0, 2^k)$}
+    \If{$s < total\_weight$}
+        \State $t \leftarrow s$
+    \EndIf
+    \State $retries \leftarrow retries + 1$
+    \EndWhile
+    \State $cweight \leftarrow 0$
+    \State $index \leftarrow None$
+    \For{$i = \{0,\ldots, |weights|-1\}$} \Comment{Zero-indexing to match code}
+    \label{line:ns_forloop}
+        \State $cweight \leftarrow cweight + weights[i]$
+        \If{$cweight > t$}
+            \If{$index$ is $None$}
+                \State Check that $cweight + weights[i+1]$ is not in between $cweight$ and the next largest value that can be expressed with the given $p$.
+                \If{Check fails}
+                \State \textbf{return} insufficient precision error
+                \EndIf
+                \State $index\leftarrow i$
+                \If{$optimize$}
+                    \State \textbf{return} $index$
+                \EndIf
+            \EndIf
+        \EndIf
+    \EndFor
+    \State return $index$
+    \EndProcedure
+  \end{algorithmic}
+\end{algorithm}
+\subsubsection{Rust Code}
+Source File: \texttt{exactarithmetic.rs}.
+
+
+\lstinputlisting[firstline=64,lastline=193,firstnumber=64,language=rust]{code/exactarithmetic.rs}
+
+%\clearpage
+\section{\texttt{ArithmeticConfig}}\label{section:arithmeticconfig}
+
+\subsection{Struct}
+The {\tt ArithmeticConfig} struct is essentially a wrapper around all of the inexact arithmetic monitoring and precision logic. It provides several useful helper functions including {\tt get\_float} and {\tt get\_rand\_float } which return {\tt Float}s with precision inherited from the {\tt ArithmeticConfig}. In general, if you want to enforce exact arithmetic, it's best to construct all {\tt Float}s used via these methods to ensure that they have the correct precision. (We omit detailed proof for these helper methods, as the code is self-explanatory.)
+
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=196,lastline=213,firstnumber=196,language=rust]{code/exactarithmetic.rs}
+\subsection{Exact Arithmetic Monitoring}
+For exact arithmetic monitoring, the caller should use {\tt enter\_exact\_scope } to clear the current flags and start monitoring exact arithmetic and {\tt exit\_exact\_scope } when the exact arithmetic is completed and they want to confirm that no inexact arithmetic was performed. 
+
+\begin{proposition}
+If inexact arithmetic is performed on a {\tt Float} including addition, multiplication, exponentiation, etc resulting in overflow, underflow, inexact result\footnote{See {\tt https://tspiteri.gitlab.io/gmp-mpfr-sys/mpfr/MPFR-Interface.html\#Exception-Related-Functions} for the complete list of conditions}, between a call of {\tt enter\_exact\_scope} and {\tt exit\_exact\_scope}, then {\tt exit\_exact\_scope}  will return an error as long as no other code clears the {\tt mpfr::flags}. 
+\end{proposition}
+
+We state this as a proposition as correctness is self-explanatory. However, it is critical to note that any other code which interacts with the {\tt mpfr::flags} at runtime breaks this assumption. In particular, \textbf{we have not tested or designed this code to work in a multi-threaded environment (i.e., multiple {\tt ArithmeticConfigs} concurrently entering and exiting exact scopes).}
+
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=402,lastline=440,firstnumber=402,language=rust]{code/exactarithmetic.rs}
+% \subsection{Basic Constructor}
+% ArithmeticConfig can be constructed in a basic form, which sets the precision to the default precision of the system, or can be initialized directly for the exponential mechanism. (See precision determination below.) 
+% \subsubsection{Rust Code}
+% \lstinputlisting[firstline=216,lastline=222,firstnumber=216,language=rust]{code/exactarithmetic.rs}
+
+% \subsection{Precision Changes}
+% Increasing precision always checks that the new precision does not exceed the allowed maximum. 
+
+% \subsubsection{Rust Code}
+% \lstinputlisting[firstline=349,lastline=358,firstnumber=349,language=rust]{code/exactarithmetic.rs}
+
+%\clearpage
+\subsection{Precision Determination for Exponential Mechanism}
+\textit{Please refer to Table \ref{tab:empprec} for types and variable names.}
+
+There are two ways of determining the precision needed for the exponential mechanism: empirically and analytically (worst-case). We need precision sufficient to compute any combination (subset sum) of the weights $2^{-\eta u(d,o)}$ for any set of utilities within the specified clamping bounds in order to sample from the desired distribution. The first technique is to compute a set of ``worst case'' sums, and increase the precision until it is sufficient to compute the sums exactly. The second technique (see Lemma \ref{lemma:minprec}) is to compute the worst-case minimum precision required analytically. It is discussed in the next subsection. 
+
+
+The worst-case empirical precision is computed by taking the set of ``worst-case'' sums, i.e., the maximum total weight plus the weight with the largest precision requirement after the decimal. This corresponds to the highest precision required to compute a subset sum. Algorithm \ref{alg:precision} outlines the procedure in detail.
+
+\begin{table}[H]
+    \centering
+    \begin{tabular}{|l p{3cm}|l p{9cm}|} \hline
+          & & Type & Description  \\\hline
+          $\eta$ & {\tt eta} & {\tt Eta} & Privacy parameter of the form $z\log_2(x/2^y)$ for \unsigned{32} $x,y,z$ such that $x/2^y<1$. \\ \hline 
+        $p$ & {\tt p} & \unsigned{32} & Precision. \\ \hline 
+         $o_{max}$ & {\tt max\_outcomes} & \unsigned{32} & Maximum size of outcome space for exponential mechanism. \\ \hline 
+         $u_{min}$ & {\tt utility\_min} & \signed{64} & Minimum utility (maximum magnitude weight) value. \\ \hline
+         $u_{max}$ & {\tt utility\_max} & \signed{64} & Maximum utility (minimum magnitude weight) value. \\ \hline
+         $w_{max}$ & {\tt max\_weight} & {\tt Float} & Maximum possible subset sum of weights \\ \hline 
+         $combsum$ & {\tt \_combination } & {\tt Float} &  Intermediate value \\ \hline 
+    \end{tabular}
+    \caption{Variables and Types for  Precision Determination}
+    \label{tab:empprec}
+\end{table}
+
+\begin{lemma}\label{lemma:minexpprec}
+Algorithm \ref{alg:precision} either returns a precision sufficient to exactly compute any subset sum of at most $o_{max}$ (\unsigned{32}) integer utilities in the range $[u_{min},u_{max}]$ (where $u_{min},u_{max}$ are \signed{64}) with privacy parameter $\eta$, i.e. the sum of at most $o_{max}$ utilities of the form $2^{-\eta u}$ for $u \in [u_{min},u_{max}] \cap \N$, or returns in error if such a precision cannot be determined.
+\end{lemma}
+\begin{proof}
+The worst-case empirical procedure (Algorithm \ref{alg:precision}) computes every hypothetical worst case, and reports the required precision. More concretely, 
+given a bound on the number of outcomes ($o_{max}$) and a range of utilities  ($[u_{min},u_{max}]$) with  maximum weight $w_{max}=2^{-\eta u_{min}}$, it suffices to ensure that we have sufficient precision to calculate (1) each weight independently, i.e., $2^{-\eta u}$ for integer $u \in [u_{min}, u_{max}]$ and (2) the maximum possible sum of the weights plus the weight with highest fractional precision ($w_*$), i.e. $\lceil{o_{max}w_{max}}\rceil + w_{*}$. (Note that $w_*$ is not necessarily the smallest weight.) This follows from observing that the maximum number of bits required for the mantissa will be dictated by the largest possible sum of weights and the highest fractional precision needed to express any individual weight. Thus if the precision is sufficient to express $w_{i}$ and $\lceil{o_{max} w_{max}}\rceil + w_{i}$ for all $i \in [u_{min}, u_{max}]$ where $w_i = 2^{-\eta i}$, then it is sufficient to compute the sum of any valid subset of weights. Algorithm \ref{alg:precision} implements this procedure by first determining the minimum precision for the ``base'' of $2^{-\eta}$, and attempts to compute the maximum sum of $maxsum = o_{max}2^{-\eta u_{min}}$ and each subset sum $\lceil{maxsum}\rceil + 2^{-\eta u}$ for each integer $u \in [u_{max},u_{min}]\cap \N$. 
+%We implement a simple iterative procedure which attempts to compute this set of sums and increases the working precision if any computations are inexact, terminating once all computations can be performed exactly. %\footnote{It is possible to determine the precision by examining the number of bits required for each utility in the range, the base $e^{-\eta}$, etc., but the code for the iterative precision increase is significantly simpler to read and understand.} Algorithm \ref{alg:precision} outlines this procedure in detail.
+%Algorithm \ref{alg:precision} outlines the procedure in detail.
+\end{proof}
+
+
+\subsubsection{Pseudocode}
+
+\begin{algorithm}[H]
+  \caption{Minimum precision determination}
+  \label{alg:precision}
+\begin{algorithmic}[1]
+  \LineComment{\textbf{Inputs}: $u_{min}$ (\signed{64}), the minimum utility, $u_{max}$ (\signed{64}), the maximum utility, $o_{max}$ (\unsigned{32}) the maximum number of outcomes, the privacy parameter $\eta$ ({\tt Eta \{x,y,z\}} for \unsigned{32} x, y, z).} 
+  \LineComment{\textbf{Outputs}: $p$ (\unsigned{32}), a sufficient precision no more than twice the size of the minimum precision to successfully run the base-2 exponential mechanism.}
+    \Procedure{GetEmpiricalPrecision}{$u_{min}$ (\signed{64}), $u_{max}$ (\signed{64}), $o_{max}$ (\unsigned{32}), $\eta$ ({\tt Eta})}
+    \State $p \leftarrow $ system default
+    \While{inexact arithmetic for $2^{-\eta}$} \Comment{Make sure we can compute $2^{-\eta}$ exactly.}
+        \State $p \leftarrow 2p$
+        \If{$p \geq $ system maximum} \textbf{return} error \EndIf
+    \EndWhile
+    \While{$\textsc{CheckPrecision}(u_{min},u_{max},o_{max},\eta,p)$ fails}
+    \State $p \leftarrow 2p$ \Comment{$2p$ can be changed to a fixed increment if preferred.} %\Comment{Double the precision until the required computations succeed.}
+    \EndWhile
+    \State \textbf{return} $p$
+    \EndProcedure
+    \LineComment{Computes the worst-case sums and returns failure on inexact arithmetic. }
+    \Function{CheckPrecision}{$u_{min}$ (\signed{64}), $u_{max}$ (\signed{64}), $o_{max}$ (\unsigned{32}), $\eta$ ({\tt Eta}), $p$ (\unsigned{32})}
+    \State Set the precision to $p$
+    \State Begin monitoring inexact arithmetic
+    \State $w_{max} \leftarrow 2^{-\eta u_{min}}$
+    \State $maxsum \leftarrow w_{max}*o_{max}$
+    %\State $minweight \leftarrow 2^{-\eta u_{max}}$
+    \For{$u \in [u_{min},u_{max}]$}
+    \State $combsum \leftarrow 2^{-\eta u} + \lceil{maxsum}\rceil$
+    \EndFor
+    \State Stop monitoring inexact arithmetic
+    \If{inexact arithmetic} \textbf{return} failure 
+    \Else{} \textbf{return} success
+    \EndIf 
+    \EndFunction
+  \end{algorithmic}
+\end{algorithm}
+\subsubsection{Rust Code}
+Source File: \texttt{exactarithmetic.rs}.
+\lstinputlisting[firstline=224,lastline=277,firstnumber=224,language=rust]{code/exactarithmetic.rs}
+%\clearpage
+\subsection{Constructor for Exponential Mechanism}
+
+The primary consideration for correctness of the constructor for the \texttt{ArithmeticConfig} for the exponential mechanism is that it chooses the appropriate precision. Correctly instantiating the flags for inexact arithmetic, retry\_min, etc, are just assignments. 
+
+We first prove a lemma concerning the analytical minimum precision required for the exponential mechanism. \textit{Please refer to Table \ref{tab:empprec} for variable types.}
+
+\begin{lemma}\label{lemma:minprec}
+Given a range of utilities $u_{min}$ (\signed{64}) to $u_{max}$ (\signed{64}), a maximum number of outcomes $o_{max}$ (\unsigned{32}) and a privacy parameter $\eta = -z\log_2(\frac{x}{2^y})$ such that $x,y,z$ are positive integers and $\frac{x}{2^y}\leq 1$, the sum of any subset of at most $o_{max}$ weights of the form $2^{-\eta u}$ computed from integer utilities within the range $[u_{min}, u_{max}]$ requires at most $(\max(1,|u_{min}|) $ $+ \max(1,|u_{max}|))z(y + b_x) + o_{max}$ bits of precision. Where $b_x$ is the number of bits required to write the value $x$ in binary.
+\end{lemma}
+
+\begin{proof}
+Given a binary number $q$ and an integer $n$, $q^n$ can be written with $\max(1,b_q |n|)$ bits of precision.  
+Writing $2^{-\eta u}$ requires no more than $\max(1,|u|)z(y + b_x)$ bits of precision. Thus to write the largest weight, corresponding to $u_{min}$, we require no more than $\max(1,|u_{min}|)z(y + b_x)$ bits. The largest possible value any combination of weights could take on is $o_{max} 2^{-\eta u_{min}}$, and adding $2^{-\eta u_{min}}$ to itself $o_{max}$ times requires an extra $o_{max}$ bits of precision, as each addition increases the precision by at most one bit. Thus, the largest possible combination requires $o_{max} + \max(1,|u_{min}|)z(y + b_x)$ bits. This corresponds to the largest possible number of bits needed before the decimal. To compute the largest possible number of bits needed after the decimal, we consider the smallest possible weight, $2^{-\eta u_{max}}$, which will require $|u_{max}|z(y + b_x)$ bits. Thus in the worst case, we require maximum precision on both sides of the decimal, yielding the desired maximum bound of $(\max(1,|u_{min}|) + \max(1,|u_{max}|))z(y + b_x) + o_{max}$.
+\end{proof}
+
+The pseudocode for analytical empirical determination is omitted, as it is fully described in the expressions above. The code implementing this expression is included in Lines 324-331 of the code below.
+
+\begin{theorem}\label{thm:sufficientprecision}
+The constructor  \texttt{for\_exponential} instantiates an {\tt ArithmeticConfig} with sufficient precision to execute the exponential mechanism exactly. 
+\end{theorem}
+
+\begin{proof}
+The proof of the theorem follows from the either Lemma \ref{lemma:minprec} or Lemma \ref{lemma:minexpprec} depending on whether the {\tt empirical\_precision} parameter is set to {\tt True} or {\tt False}.
+\end{proof}
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=280,lastline=346,firstnumber=280,language=rust]{code/exactarithmetic.rs}
+
+%\clearpage
+\section{Exact Arithmetic Helper Methods}
+Source File: \texttt{exactarithmetic.rs}.
+
+\subsection{\texttt{get\_power\_bound}}
+\begin{lemma}
+\texttt{get\_power\_bound} computes the smallest value of $k$ (\signed{32}) such that $2^k \geq total\_weight$ given the positive argument $total\_weight$ ({\tt Float}), i.e., $\argmin_{k \in \mathbb{N}}\{2^k \geq total\_weight\}$. If $total\_weight <=0$, returns 0.
+\end{lemma}
+(See code below for pseudocode).
+\begin{proof}
+The computation proceeds in two cases depending on whether $total\_weight$ is (A) greater than or (B) less than or equal to 1.
+
+Case A. Initialize $k = 0$, then compute $2^k$ and increment $k$ until $2^k \geq total\_weight$, which necessarily chooses the smallest value of $k$ such that $2^k \geq total\_weight$.
+
+Case B. 
+Another way to compute $\argmin_{k \in \mathbb{N} \geq 0}\{2^k \geq total\_weight\}$ is to take $k = -t$ for $$\argmax_{t \in \mathbb{N} \geq 0}\{2^t total\_weight < 1\}.$$
+%In this case, the correct value of $k$ is equivalent to $-t$ for $\argmin_{t \in \mathbb{N}\geq 0}\{2^t total\_weight < 1\}$. 
+Initialize $k=0$. Take $w = total\_weight$. While $w <=1$, multiply $w$ by $2$ and decrement $k$ by 1. Notice that the first iteration of the loop when $w <=1 $ corresponds to the point when $k$ has been sufficiently decremented such that $2^{-k} total\_weight <= 1$, thus $k+1$ is the smallest $k$ such that $2^k \geq total\_weight$. 
+\end{proof}
+
+ 
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=38,lastline=62,firstnumber=38,language=rust]{code/exactarithmetic.rs}
+
+
+%\clearpage
+\subsection{\texttt{randomized\_round}}\label{section:randomizedround}
+\texttt{randomized\_round} chooses $\lfloor{x}\rfloor$ or $\lceil{x}\rceil$ by drawing a random value $\rho$ with precision determined by {\tt arithmetic\_config} and rounding down if $\rho >  x - \lfloor{x}\rfloor$ and rounding up otherwise. Please see rust code for pseudocode and to confirm correctness.
+
+\subsubsection{Privacy of Randomized Rounding}
+\aside{We may want to rewrite this explicitly as base 2, but the logic is identical.}
+\begin{lemma}[Privacy of arbitrary precision randomized
+rounding]\label{lemma:randomizedrounding}
+Given an implementation of a utility function $u: O \rightarrow \Float$ which guarantees that for any pair of adjacent databases $|u(d',o)- u(d,o)| \leq \alpha$ for integer $\alpha$ as implemented\footnote{By ``as implemented'' we mean that the implementation of $u$ has sensitivity $\leq \alpha$. If inexact implementation of $u$ results in increased sensitivity, then this must be taken into account.}, the exponential mechanism with a randomized rounding function of arbitrary precision is $2\alpha \varepsilon-$DP.
+\end{lemma}
+
+\begin{proof}
+% Recall that given a utility function $u$ such that $|u(d,o)-u(d',o)| \leq \alpha$ the exponential mechanism is $2\alpha\varepsilon-$DP. 
+% Consider the composed utility function $u'(d,o):=\rho(u(d,o))$. Notice that if $\Delta u' \leq \alpha$, then the randomized rounding exponential mechanism, which is exactly the exponential mechanism with utility function $u'$, is $2\alpha\varepsilon-$DP.
+
+Suppose to implement randomized rounding that we draw a number $s$ uniformly at random from $[0,1)$, and round up if $s \leq |u(d,o)-\lfloor{u(d,o)} \rfloor|$ (and otherwise round down). 
+Fix a particular choice of $s$. Consider a pair of adjacent databases $d$ and $d'$ such that $u(d',o)>u(d,o)$. Notice that it is impossible for the rounding procedure to result in a difference in composed utility of more than $\alpha$. This follows from observing that there are two cases: either $\lfloor{u(d',o)} \rfloor - \lfloor{u(d,o)} \rfloor < \alpha$, in which case any rounding results in difference at most $\alpha$, or $\lfloor{u(d',o)} \rfloor - \lfloor{u(d,o)} \rfloor = \alpha$.
+
+If $\lfloor{u(d',o)} \rfloor - \lfloor{u(d,o)} \rfloor = \alpha$, then $\lfloor{u(d',o)} \rfloor - \lfloor{u(d,o)} \rfloor \geq u(d',o) - u(d,o)$, and thus 
+ $u(d',o)-\lfloor{u(d',o)} \rfloor \leq u(d,o)-\lfloor{u(d,o)} \rfloor$. 
+ % as $\alpha - 1 < u(d'o) - u(d,o) \leq \alpha$. 
+Therefore $s$ is  in one of three regions:
+\begin{enumerate}[leftmargin=*]
+    \item $s \in [0, u(d',o)-\lfloor{u(d',o)} \rfloor]$, which results in both values rounded up,
+    \item $s \in (u(d',o)-\lfloor{u(d',o)} \rfloor,u(d,o)-\lfloor{u(d,o)} \rfloor]$, which results in $u(d',o)$ rounded down and $u(d,o)$ rounded up, or
+    \item $s \in (u(d,o)-\lfloor{u(d,o)} \rfloor,1)$, which results in both rounded down.
+\end{enumerate}
+Thus, for any $s$ rounding never results in a  difference between $u(d,o)$ and $u(d',o)$ greater than $\alpha$. (The symmetric argument follows for any $o$ such that $u(d,o)>u(d',o)$.) 
+Take the utility function $u_S:=\rho(u(d,o))$ to be the utility function with fixed randomness $S$, i.e., the set of $s$ used for each rounding decision.
+From the above, $\Delta u_S \leq \alpha$. Thus, the exponential mechanism with utility function $u_S$ is $2\alpha\varepsilon-$DP. Write $p_S(o)$ for the probability that the exponential mechanism with utility function $u_S$ outputs the element $o$. Taking $p(o)$ to be the probability that the randomized rounding exponential mechanism outputs $o$, we can therefore write
+\[p(o) = \sum_{S \sim [0,1)^{|O|}}\Pr[S]p_S(o)\]
+and for any adjacent database, we can write
+\[p'(o) = \sum_{S \sim [0,1)^{|O|}}\Pr[S]p'_S(o)\]
+where $S \sim [0,1)^{|O|}$ indicates the set of all possible random values $s \in [0,1)$ used for sampling. 
+Because $\Delta u_S \leq \alpha$, we have that  $\frac{p_S(o)}{p'_S(o)}\leq e^{-2\alpha\varepsilon}$, so
+\begin{align*}
+  \frac{p(o)}{p'(o)}  &= \frac{\sum_{S \sim [0,1)^{|O|}}\Pr[S]p_S(o)}{ \sum_{S \sim [0,1)^{|O|}}\Pr[S]p'_S(o)} \\ &\leq \frac{\sum_{S \sim [0,1)^{|O|}}\Pr[S]e^{2\alpha\varepsilon}p'_S(o)}{ \sum_{S \sim [0,1)^{|O|}}\Pr[S]p'_S(o)}\\
+  & = e^{2\alpha\varepsilon}
+\end{align*}
+% Therefore, the sensitivity of $u'=\rho(u(d,o))$ \textit{conditioned} on $s$ is $\leq \alpha$. 
+% Thus, fixing the randomness used for rounding, the exponential mechanism with utility function $u'$ is $2\alpha\varepsilon-$DP. 
+%$\Delta u' | s \leq \alpha$. 
+%(1)  (2) $(|u(d',o)-\lfloor{u(d',o)} \rfloor|,|u(d,o)-\lfloor{u(d,o)} \rfloor|]$, which results in $u(d')$ rounded down and $u(d)$ rounded up, or (3) 
+
+% Now, consider the ratio of the probabilities of outputting a particular element $o$ for two adjacent databases.
+% \[\frac{p(o)}{p'(o)} = \frac{e^{-\varepsilon \rho(u(d, o))}}{\sum_{o \in O} e^{-\varepsilon \rho(u(d,o))}}\cdot \frac{\sum_{o \in O} e^{-\varepsilon \rho(u(d',o))}}{e^{-\varepsilon \rho(u(d', o))}}\]
+% Next, consider the probabilities conditioned on a particular string of randomness $S$ used for randomized rounding:
+% \[\frac{p(o|S)}{p'(o|S)} = \frac{e^{-\varepsilon \rho_{S}(u(d, o))}}{\sum_{o \in O} e^{-\varepsilon \rho_{S}(u(d,o))}}\cdot \frac{\sum_{o \in O} e^{-\varepsilon \rho_{S}(u(d',o))}}{e^{-\varepsilon \rho_{S}(u(d', o))}}\]
+% Therefore $\Delta u' \leq \alpha$ as the probability of drawing any particular $s$ is independent of the database. Notice that the privacy proof does not rely on the precision of $s$ or the degree to which $s$ is sampled perfectly from the uniform distribution over $[0,1)$, only that the choice of $s$ is independent of $d$. In fact, we could fix a single $s$ and use it for every instance of rounding, and the proof of privacy would still hold.
+% The randomized rounding mechanism satisfies that $|\rho(u(d,o)) - \rho(u(d',o))| \leq 2$, and thus the randomized rounding exponential mechanism is $4\varepsilon-$DP.
+
+% Notice that if $\rho$ rounds with probabilities approximating $|u(d,o)-\lceil{u(d,o)} \rceil|$, that the \textit{range} of $\rho$ is unchanged and the mechanism is still $4\varepsilon-$DP. Thus, for any implementation of $\rho$ over the correct range, the privacy guarantee holds.
+%The proof essentially follows from choosing an arbitrary rounding of $u(x,o)$ for each $o \in O$ and arguing that $\Delta(u)$ increases to at most $2$, giving the desired privacy bound. Because this holds for arbitrary rounding, it also holds for imprecise rounding. Accuracy obviously is impacted by imprecise or arbitrary rounding.
+\end{proof}
+
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=11,lastline=36,firstnumber=11,language=rust]{code/exactarithmetic.rs}
+
+%\clearpage
+\section{\texttt{Eta}}
+Source File: \texttt{params.rs}.
+
+\subsection{Struct}
+The {\tt Eta} struct is very simple, and just holds the values $x$, $y$ and $z$ needed to compute the parameter $z\log_2(x/2^y)$.
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=9,lastline=16,firstnumber=9,language=rust]{code/params.rs}
+
+\subsection{Constructors}
+The construction of an {\tt Eta} privacy parameter is very simple for a specified $x$, $y$ and $z$. The {\tt check} function is used to verify basic properties of the provided $x$, $y$ and $z$ to ensure that all are positive, and $x/2^y < 1$.
+\subsubsection{Rust Code}
+\lstinputlisting[firstline=29,lastline=41,firstnumber=29,language=rust]{code/params.rs}
+\paragraph{Validity check}
+\lstinputlisting[firstline=79,lastline=98,firstnumber=79,language=rust]{code/params.rs}
+
+\subsection{Base Computation}
+For convenience, the {\tt Eta} struct can compute $2^{-\eta}$ at a give precision and returns a {\tt Float} representing the value. Note that no inexact arithmetic enforcement is performed. This is intentional, and the caller is responsible for enforcing exact arithmetic if needed. (See, e.g., {\tt get\_empirical\_precision}.)
+\lstinputlisting[firstline=109,lastline=126,firstnumber=109,language=rust]{code/params.rs}
+
+%\clearpage
+\section{Additional Proofs}
+
+\begin{proposition}\label{prop:clamp}
+Given a utility function $u$ such that $\Delta u \leq \alpha$,  $\mathsf{clamp}(u, A, B)$ where  \[\mathsf{clamp}(u,A,B)(x,o):=  \min(\max(A,u(x,o)), B)\] has sensitivity $\Delta \mathsf{clamp}(u,A,B)\leq \Delta u$.
+\end{proposition}
+\noindent The proof of the proposition follows from observing that clamping values cannot increase the difference in utility of adjacent databases.\footnote{Note that settings in which outcome spaces of the mechanism are not equivalent for adjacent databases, e.g. integer partitions, that this clamping argument does not hold, and the full range of $u$ specified by the mechanism must be supported at the cost of increased precision.} 
+%\clearpage
+\section{Miscellaneous}\label{section:misc}
+\subsection{Canary tests}
+\subsubsection{Arithmetic Flags}
+The test {\tt test\_flags} checks several of the important {\tt mpfr::flags} properties that are critical for correctness of the mechanisms. If this test fails, it should be considered a critical failure, and it's likely that there will be undesired behavior. 
+
+\appendix
+\section{Formatting Information}
+\subsection{Inline Rust Code.}
+Rust code is included using the \texttt{listings} package with a custom Rust style file from \url{https://github.com/denki/listings-rust}. We can pull directly from the current version of the code file, as long as we have the appropriate line numbers for start/end of the function, or just pull in the whole file. By including the Rust code inline, it should be easier for either one or two reviewers to comment on a single document for pseudocode matching code and proof of pseudocode correctness. In cases where code is extremely simple, this may also remove the need for redundant pseudocode (see: \texttt{randomized\_round}).
+
+
+
+
+\end{document}
