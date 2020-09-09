@@ -1,5 +1,6 @@
 pub mod mechanisms;
 pub mod noise;
+pub mod b2dp;
 
 use whitenoise_validator::errors::*;
 

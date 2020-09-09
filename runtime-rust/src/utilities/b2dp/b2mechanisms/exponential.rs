@@ -154,7 +154,7 @@ impl ExponentialConfig {
 /// occurs. 
 /// ## Example
 /// ```
-/// use b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL, ExponentialOptions};
+/// use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL, ExponentialOptions};
 /// 
 /// fn util_fn (x: &u32) -> f64 {
 ///     return ((*x as f64)-0.0).abs();

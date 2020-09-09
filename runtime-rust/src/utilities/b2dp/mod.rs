@@ -32,8 +32,8 @@
 //! ## Example Usage
 //! **Converting a base-e parameter to base-2**
 //! ```
-//! use b2dp::Eta;
-//! # use b2dp::errors::*;
+//! use whitenoise_runtime::utilities::b2dp::Eta;
+//! # use whitenoise_validator::errors::*;
 //! # fn main() -> Result<()> {
 //! let epsilon = 1.25;
 //! let eta = Eta::from_epsilon(epsilon)?;
@@ -43,7 +43,8 @@
 //! 
 //! Run the exponential mechanism with utility function `utility_fn`.
 //! ```
-//! use b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL, errors::*};
+//! use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL};
+//! # use whitenoise_validator::errors::*;
 //! 
 //! # fn main() -> Result<()> {
 //! fn util_fn (x: &u32) -> f64 {
@@ -68,7 +69,8 @@
 //! implementation is `2*alpha*ln(2)*eta` base-e DP. To explicitly scale by `alpha`
 //! the caller can either modify the `eta` used or the utility function.
 //! ```
-//! use b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL, errors::*};
+//! use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL};
+//! use whitenoise_validator::errors::*;
 //! # fn main() -> Result<()> {
 //! // Scale the privacy parameter to account for the utility sensitivity
 //! let epsilon = 1.25;
@@ -85,90 +87,7 @@
 //! # Ok(())
 //! # }
 //! ```
-//! **Sparse Vector** an exact implementation of discrete sparse vector (upcoming work). Takes in a
-//! set of query values (does not currently support a query function interface) and returns 
-//! `true` or `false` depending on whether each query exceeds the fixed threshold of `0`. 
-//! 
-//! ```
-//! # use b2dp::{Eta,GeneratorOpenSSL, sparse_vector, errors::*};
-//! # use rug::Float;
-//! # fn main() -> Result<()> {
-//! let eta1 = Eta::new(1,1,2)?;
-//! let eta2 = Eta::new(1,1,2)?;
-//! let c = 2;
-//! let queries = vec![1.0,2.0,3.0,4.0,5.0,1.0];
-//! let gamma = 0.5;
-//! let q_min = 0.0;
-//! let q_max = 6.0;
-//! let w = 5.0;
-//! let rng = GeneratorOpenSSL {};
-//! let optimize = false;
-//! let outputs = sparse_vector(eta1, eta2, c, &queries, gamma, q_min, q_max, w, rng, optimize)?;
-//! # Ok(())
-//! # }
-//! ```
-//! 
-//! **Noisy Threshold** [`noisy_threshold`](./utilities/discretesampling/fn.noisy_threshold.html) determines whether discrete Laplace noise
-//! centered at `0` with granularity `gamma` exceeds the given `threshold`. 
-//! 
-//! ```
-//! # use b2dp::{Eta,GeneratorOpenSSL,utilities::exactarithmetic::ArithmeticConfig, noisy_threshold, errors::*};
-//! # use rug::Float;
-//! # fn main() -> Result<()> {
-//! let eta = Eta::new(1,1,2)?; // can be adjusted for the desired value of gamma.
-//! let mut arithmeticconfig = ArithmeticConfig::basic()?;
-//! let rng = GeneratorOpenSSL {};
-//! let gamma_inv = Float::with_val(arithmeticconfig.precision, 2);
-//! let threshold = Float::with_val(arithmeticconfig.precision, 0);
-//! arithmeticconfig.enter_exact_scope()?; 
-//! let s = noisy_threshold(eta, & mut arithmeticconfig, &gamma_inv, &threshold, rng, false)?;
-//! assert!(!s.is_finite()); // returns plus or minus infinity
-//! if s.is_sign_positive() { /* Greater than the threshold */ ;}
-//! else { /* Less than the threshold. */ ;}
-//! let b = arithmeticconfig.exit_exact_scope();
-//! assert!(b.is_ok()); // Must check that no inexact arithmetic was performed. 
-//! # Ok(())
-//! # }
-//! ```
-//! 
-//! **Sample within Bounds**: samples from the Discrete Laplace mechanisms within the bounds,
-//! where boundary values are sampled with sum of probabilities of all values less than (or greater than)
-//! the bound.
-//! 
-//! ```
-//! # use b2dp::{Eta,GeneratorOpenSSL,utilities::exactarithmetic::ArithmeticConfig, sample_within_bounds, errors::*};
-//! # use rug::Float;
-//! # fn main() -> Result<()> {
-//! # let eta = Eta::new(1,1,2)?; // construct eta that can be adjusted for the desired value of gamma.
-//! # let mut arithmeticconfig = ArithmeticConfig::basic()?;
-//! # let rng = GeneratorOpenSSL {};
-//! let gamma = Float::with_val(arithmeticconfig.precision, 0.5);
-//! let wmin = Float::with_val(arithmeticconfig.precision, -5);
-//! let wmax = Float::with_val(arithmeticconfig.precision, 5);
-//! arithmeticconfig.enter_exact_scope()?;
-//! let s = sample_within_bounds(eta, &gamma, &wmin, &wmax, & mut arithmeticconfig, rng,false)?;
-//! let b = arithmeticconfig.exit_exact_scope();
-//! assert!(b.is_ok()); // Must check that no inexact arithmetic was performed. 
-//! # Ok(())
-//! # }
-//! ```
-//! 
-//! **Integer Partitions**: a sample invocation given a distance `d` for the 
-//! integer partition exponential mechanism as in Blocki, Datta and Bonneau '16.
-//! ```
-//! # use b2dp::{Eta,GeneratorOpenSSL,integer_partition_mechanism_with_bounds, PartitionBound, errors::*};
-//! # use rug::Float;
-//! # fn main() -> Result<()> {
-//! let eta = Eta::new(1,1,1)?;
-//! let d = 5;
-//! let x: Vec<i64> = vec![5,4,3,2,1,0];
-//! let total_count = 15; // upper bound on total count
-//! let total_cells = x.len() + d;
-//! let pb = PartitionBound::from_dist(d, &x, total_count, total_cells)?;
-//! let y = integer_partition_mechanism_with_bounds(eta, &x, &pb, Default::default())?;
-//! # Ok(())
-//! # }
-//! ```
+
 
 use whitenoise_validator::errors::*;
 
