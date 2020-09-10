@@ -1,34 +1,22 @@
 //! # Base-2 Differential Privacy Module
 //! Implements the exponential mechanism and other utilities for base-2 
-//! Differential Privacy, based on [Ilvento '19](https://arxiv.org/abs/1912.04222).
-//! 
-//! **Status:** active development, reference implementation only. Not 
-//! intended for uses other than research. **Subject to change without notice.**
+//! Differential Privacy, based on 
+//! [Ilvento '19](https://arxiv.org/abs/1912.04222).
 //! 
 //! ## Background
 //! Although the exponential mechanism does not directly reveal the result of inexact
 //! floating point computations, it has been shown to be vulnerable to attacks based
 //! on rounding and no-op addition behavior of floating point arithmetic. To prevent
 //! these issues, base-2 differential privacy uses arithmetic with base 2, rather than 
-//! base e, allowing for an exact implementation. This crate implements the base-2 exponential
-//! mechanism, (experimental) sparse vector and (experimental) integer partitions, as 
-//! well as (experimental) noisy threshold and (experimental) clamped Laplace. It also 
-//! includes useful base-2 DP utilities for parameter conversion.
-//! 
-//! This code is under active development and should be treated as a reference
-//! for research purposes only (particularly anything marked *experimental*). 
+//! base e, allowing for an exact implementation.
 //! 
 //! ## Mechanism Details
 //! * Base-2 exponential mechanism and parameter construction are described in
 //!   this [paper](https://arxiv.org/abs/1912.04222).
-//! * The integer partition exponential mechanism is based on extensions of
-//!   the mechanism proposed by Blocki, Datta and Bonneau in this [paper](http://www.jbonneau.com/doc/BDB16-NDSS-pw_list_differential_privacy.pdf).
-//!   Extensions include a pure-DP version of the mechanism and bias computation, 
-//!   and are described in this [working paper](http://bit.ly/39XyNrp).
-//! * The sparse vector mechanism implementation is based on a [working paper](http://bit.ly/3i4EJ4L) that describes
-//!   the dangers of inexact implementation of sparse vector, and in particular
-//!   how randomness alignment must be adjusted to deal with finite values. 
-//! 
+//! * Proofs and pseudocode matching this implementation are available in the
+//!   [whitepapers](https://github.com/opendifferentialprivacy/whitenoise-core/blob/develop/whitepapers/mechanisms/b2_exponential_mechanism_proofs.pdf).
+//!  * Mechanism does not scale privacy parameters based on sensitivity, it is 
+//!    the caller's responsibility to do so. 
 //! ## Example Usage
 //! **Converting a base-e parameter to base-2**
 //! ```
@@ -43,7 +31,8 @@
 //! 
 //! Run the exponential mechanism with utility function `utility_fn`.
 //! ```
-//! use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL};
+//! use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, 
+//!                                           Eta, GeneratorOpenSSL};
 //! # use whitenoise_validator::errors::*;
 //! 
 //! # fn main() -> Result<()> {
@@ -69,7 +58,8 @@
 //! implementation is `2*alpha*ln(2)*eta` base-e DP. To explicitly scale by `alpha`
 //! the caller can either modify the `eta` used or the utility function.
 //! ```
-//! use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, Eta, GeneratorOpenSSL};
+//! use whitenoise_runtime::utilities::b2dp::{exponential_mechanism, 
+//!                                           Eta, GeneratorOpenSSL};
 //! use whitenoise_validator::errors::*;
 //! # fn main() -> Result<()> {
 //! // Scale the privacy parameter to account for the utility sensitivity
@@ -87,9 +77,6 @@
 //! # Ok(())
 //! # }
 //! ```
-
-
-use whitenoise_validator::errors::*;
 
 /// Base-2 Differential Privacy Utilities
 pub mod b2utilities;

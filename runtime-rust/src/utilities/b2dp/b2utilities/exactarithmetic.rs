@@ -13,8 +13,9 @@ use gmp_mpfr_sys::mpfr;
 ///   * `x`: the value to round
 ///   * `arithmetic_config`: the arithmetic configuration to use
 /// ## Returns
-/// `x` rounded to the nearest smaller or larger integer by drawing a random value
-/// `rho` in `[0,1]` and rounding down if `rho > x_fract`, rounding up otherwise.
+/// `x` rounded to the nearest smaller or larger integer by drawing a 
+/// random value `rho` in `[0,1]` and rounding down if `rho > x_fract`,
+/// rounding up otherwise.
 pub fn randomized_round<R: ThreadRandGen>
                         (x: f64,
                          arithmetic_config: &mut ArithmeticConfig,
@@ -63,51 +64,63 @@ fn get_power_bound(total_weight: &Float,
 
 /// Normalized Weighted Sampling
 /// Returns the index of the element sampled according to the weights provided.
-/// Uses optimized sampling if `optimize` set to true. Setting `optimize` to true
-/// exacerbates timing channels. 
+/// Uses optimized sampling if `optimize` set to true. Setting `optimize` to 
+/// true exacerbates timing channels. 
 /// ## Arguments
-///   * `weights`: the set of weights to use for sampling; all weights must be positive, 
+///   * `weights`: the set of weights to use for sampling; 
+///                all weights must be positive, 
 ///                zero-weight elements are not permitted.
 ///   * `arithmetic_config`: the arithmetic config specifying precision
 ///   * `rng`: source of randomness.
-///   * `optimize`: whether to optimize sampling, introducing a timing channel and an error condition
+///   * `optimize`: whether to optimize sampling, introducing a 
+///                 timing channel and an error condition 
 ///                 side channel.
 /// ## Returns
-/// Returns an index of an element sampled according to the weights provided. If the precision
-/// of the provided ArithmeticConfig is insufficient for sampling, the method returns an error.
-/// Note that errors are **not** returned on inexact arithmetic, and the caller is responsible
-/// for calling `enter_exact_scope()` and  `exit_exact_scope()` to monitor inexact arithmetic.
+/// Returns an index of an element sampled according to the weights provided. 
+/// If the precision of the provided ArithmeticConfig is insufficient for 
+/// sampling, the method returns an error.
+/// Note that errors are **not** returned on inexact arithmetic, and the 
+/// caller is responsible for calling `enter_exact_scope()` and  
+/// `exit_exact_scope()` to monitor inexact arithmetic.
 /// 
 /// 
 /// ## Known Timing Channels
 /// This method has known timing channels. They result from: 
 /// (1) Generating a random value in [0,2^k] and 
-/// (2) (In optimized sampling only) To determine the index corresponding to the random value, 
-/// the method iterates through cumulative weights
+/// (2) (In optimized sampling only) To determine the index corresponding 
+/// to the random value, the method iterates through cumulative weights
 /// and terminates the loop when the index is found and
 /// (3) (In optimized sampling only) Checking for zero weights 
 /// These can be exploited in several ways:
-///   * **Rejection probability:** if the adversary can control the total weight of the utilities
-///     such that the probability of rejection in the random index generation stage changes,
-///     the time needed for sampling will vary between adjacent databases. The difference in time
-///     will depend on the speed of random number generation. By default, ArithmeticConfig sets the 
-///     minimum retries to 1. To reduce the probability that this timing channel is accessible to an 
-///     adversary, the minimum number of retries can be increased via `ArithmeticConfig::set_retries`.
+///   * **Rejection probability:** if the adversary can control the total 
+///       weight of the utilities such that the probability of rejection in the 
+///       random index generation stage changes,
+///       the time needed for sampling will vary between adjacent databases. 
+///       The difference in time will depend on the speed of random number 
+///       generation. By default, ArithmeticConfig sets the minimum retries to
+///       one. To reduce the probability that this timing channel is accessible
+///       to an adversary, the minimum number of retries can be increased via 
+///       `ArithmeticConfig::set_retries`.
 ///   * **Optimized sampling:**
-///     * **Ordering of weights:** if the adversary can change the ordering of the weights such
-///       that the largest weights (most probable) weights are first under a certain condition,
-///       and the largest weights are last if that condition doesn't hold, then the adversary
-///       can use the time of normalized_sample to guess whether the condition holds.
-///     * **Size of weights:** if the adversary can change the size of the weights such that if
-///       a certain condition holds, the weight is more concentrated and if not the weight is less
-///       concentrated, then the adversary can use the time taken by normalized_sample as a signal
+///     * **Ordering of weights:** if the adversary can change the ordering of 
+///       the weights such that the largest weights (most probable) weights are 
+///       first under a certain condition, and the largest weights are last if 
+///       that condition doesn't hold, then the adversary can use the time of 
+///       normalized_sample to guess whether the condition holds.
+///     * **Size of weights:** if the adversary can change the size of the 
+///       weights such that if a certain condition holds, the weight is more 
+///       concentrated and if not the weight is less concentrated, then the 
+///       adversary can use the time taken by normalized_sample as a signal
 ///       for whether the condition holds.
-///     * **Zero weight:** optimized sampling also rejects immediately if a zero weight is encountered. 
-///       If the adversary can inject a zero weight at a particular position in the weights depending on
-///       a private condition, they can use the time it takes to return an error as a timing channel.
+///     * **Zero weight:** optimized sampling also rejects immediately if a 
+///       zero weight is encountered. 
+///       If the adversary can inject a zero weight at a particular position in 
+///       the weights depending on a private condition, they can use the time 
+///       it takes to return an error as a timing channel.
 /// 
-/// The timing channels for optimized sampling could be somewhat (but not completely) mitigated by 
-/// shuffling the weights prior to calling `normalized_sample`.
+/// The timing channels for optimized sampling could be somewhat (but not 
+/// completely) mitigated by shuffling the weights prior to calling 
+/// `normalized_sample`.
 /// ### Exact Arithmetic
 /// `normalized_sample` does not explicitly call `enter_exact_scope()` or
 /// `exit_exact_scope()`, and therefore preserves any `mpfr::flags` that
@@ -122,7 +135,9 @@ pub fn normalized_sample<R: ThreadRandGen>(
 {
     // Compute the total weight
     let total_weight = arithmetic_config.get_float(Float::sum(weights.iter()));
-    if total_weight == 0 { return Err("Total weight zero. Weights must be positive."); }
+    if total_weight == 0 { 
+        return Err("Total weight zero. Weights must be positive."); 
+    }
     let mut zero_weight: Option<()> = None;
 
     // Iterate through all weights to test to prevent timing channel,
@@ -158,7 +173,8 @@ pub fn normalized_sample<R: ThreadRandGen>(
     let mut cumulative_weight = arithmetic_config.get_float(0); 
     let mut index: Option<usize> = None;
 
-    // Iterate through the weights until the cumulative weight is greater than or equal to `t`
+    // Iterate through the weights until the cumulative weight is greater 
+    // than or equal to `t`
     for i in 0..weights.len() {
         let next_weight = arithmetic_config.get_float(&weights[i]);
         cumulative_weight += next_weight;
@@ -217,7 +233,10 @@ impl ArithmeticConfig {
     pub fn basic() -> Result<ArithmeticConfig, &'static str> {
         let p ;//= 53;
         unsafe {p = mpfr::get_default_prec() as u32;}
-        let config = ArithmeticConfig {precision: p, inexact_arithmetic: false, exact_scope: false, retry_min: 1};
+        let config = ArithmeticConfig {precision: p, 
+                                       inexact_arithmetic: false, 
+                                       exact_scope: false, 
+                                       retry_min: 1};
         Ok(config)
     }
 
@@ -274,9 +293,11 @@ impl ArithmeticConfig {
             }
 
             for u in utility_min..(utility_max+1) {
-                let max_weight = Float::with_val(p, new_base.pow(utility_min)).ceil();
+                let max_weight = Float::with_val(p, new_base.pow(utility_min))
+                                 .ceil();
                 let u_weight = Float::with_val(p, new_base.pow(u));
-                let _combination = Float::with_val(p, max_weight * max_outcomes + u_weight);
+                let _combination = Float::with_val(p, max_weight * max_outcomes 
+                                                      + u_weight);
             }
             
         }
@@ -287,23 +308,28 @@ impl ArithmeticConfig {
 
 
     /// Initialize an ArithmeticConfig for the base-2 exponential mechanism.
-    /// This method empirically determines the precision required to compute a linear
-    /// combination of at most `max_outcomes` weights in the provided utility range.
-    /// Note that the precision to create Floats in rug/mpfr is given as a `u32`, but the
-    /// sizes (min, max, etc) of precision returned (e.g. `mpfr::PREC_MAX`) are `i64`.
-    /// We handle this by explicitly checking that `mpfr::PREC_MAX` does not exceed the
-    /// maximum value for a `u32` (this should never happen, but we check anyway).
+    /// This method empirically determines the precision required to compute a 
+    /// linear combination of at most `max_outcomes` weights in the provided 
+    /// utility range.
+    /// Note that the precision to create Floats in rug/mpfr is given as a 
+    /// `u32`, but the sizes (min, max, etc) of precision returned (e.g. 
+    /// `mpfr::PREC_MAX`) are `i64`.
+    /// We handle this by explicitly checking that `mpfr::PREC_MAX` does not 
+    /// exceed the maximum value for a `u32` (this should never happen, 
+    /// but we check anyway).
     ///
     /// ## Arguments
     ///   * `eta`: the base-2 privacy parameter
-    ///   * `utility_min`: the minimum utility permitted by the mechanism (highest possible weight)
-    ///   * `utility_max`: the maximum utility permitted by the mechanism (lowest possible weight)
-    ///   * `max_outcomes`: the maximum number of outcomes permitted by this instance of the exponential
-    ///                     mechanism.
+    ///   * `utility_min`: the minimum utility permitted by the mechanism 
+    ///                    (highest possible weight)
+    ///   * `utility_max`: the maximum utility permitted by the mechanism 
+    ///                    (lowest possible weight)
+    ///   * `max_outcomes`: the maximum number of outcomes permitted by this 
+    ///                     instance of the exponential mechanism.
     ///
     /// ## Returns
-    /// Returns an ArithmeticConfig with sufficient precision to carry out the operations for the 
-    /// exponential mechanism with the given parameters.
+    /// Returns an ArithmeticConfig with sufficient precision to carry out the
+    /// operations for the exponential mechanism with the given parameters.
     ///
     /// ## Errors
     /// Returns an error if sufficient precision cannot be determined.
@@ -322,8 +348,9 @@ impl ArithmeticConfig {
             // Clear the flags
             mpfr::clear_flags();
 
-            // Check that the maximum precision does not exceed the maximum value of a
-            // u32. Precision for Float::with_val(precision: u32, val) requires a u32.
+            // Check that the maximum precision does not exceed the maximum 
+            // value of a u32. Precision for Float::with_val(precision: u32, 
+            // val) requires a u32.
             let mut max_precision = u32::max_value();
             if mpfr::PREC_MAX < max_precision as i64 {
                 max_precision = mpfr::PREC_MAX as u32;
@@ -355,8 +382,10 @@ impl ArithmeticConfig {
     }
 
 
-    /// Increase the precision by `increment`. Returns an error and leaves precision unchanged
-    /// if this results in precision exceeding `mpfr::PREC_MAX`.
+    /// Increase the precision by `increment`. 
+    /// ## Returns 
+    /// Returns an error and leaves precision unchanged if this results in 
+    /// precision exceeding `mpfr::PREC_MAX`.
     pub fn increase_precision(&mut self, increment: u32) -> Result<(), &'static str> 
     {
         let new_precision = self.precision + increment;
@@ -421,14 +450,17 @@ impl ArithmeticConfig {
     }
 
     /// Exit the exact arithmetic scope.
-    /// **Must be called after any arithmetic operations are performed which should be exact.**
-    /// **Must be paired with `enter_exact_scope` to ensure that flags aren't misinterpreted.**
+    /// **Must be called after any arithmetic operations are performed which 
+    /// should be exact.**
+    /// **Must be paired with `enter_exact_scope` to ensure that flags aren't 
+    /// misinterpreted.**
     /// This method checks the `mpfr` flag state, and returns whether
     /// the scope is still valid. Also sets the `inexact` property.
     /// This method does **not** reset the `mpfr` flags.
     ///
     /// ## Returns
-    ///   * `OK(())` if the configuration reports than no inexact arithmetic was performed
+    ///   * `OK(())` if the configuration reports than no inexact arithmetic 
+    ///      was performed
     ///   * `Err` if the configuration is invalid (inexact arithmetic performed)
     pub fn exit_exact_scope(&mut self) -> Result<(), &'static str> {
         if self.is_valid() == false {
@@ -579,7 +611,8 @@ mod tests {
         // this example should fail due to inexact arithmetic 
         let mut exact = arithmetic_config.enter_exact_scope();
         assert!(exact.is_ok());
-        let result = normalized_sample(&weights, & mut arithmetic_config, rng, false);
+        let result = normalized_sample(&weights, 
+            & mut arithmetic_config, rng, false);
         let _s = result.unwrap();
         exact = arithmetic_config.exit_exact_scope();
         assert!(exact.is_err());
